@@ -14,6 +14,8 @@ import lombok.NonNull;
 import lombok.Setter;
 import providers.BasePojoProvider;
 import providers.PojoProvider;
+
+import java.beans.BeanDescriptor;
 import java.beans.PropertyDescriptor;
 import wrappers.PBeanDescriptor;
 
@@ -211,20 +213,45 @@ public class ProtoToPojoMapper {
                 int i = 0;
                 for(FieldDescriptor fd : provider.getRequiredMappings().keySet()){
                     if(proto.hasField(fd)){
+                        PBeanDescriptor bd = provider.getRequiredMappings().get(fd);
                         if(fd.isRepeated()){
-                            System.out.println(fd.getType().getJavaType());
                             Collection<Object> objs = new ArrayList<>();
                             int numFields = proto.getRepeatedFieldCount(fd);
-                            for (int ny = 0; ny < numFields; ny++){
-                                Optional<Object> res = convert(proto.getRepeatedField(fd, ny), fd, provider.getFieldMappings().get(fd));
-                                res.ifPresent(objs::add);
-                            }                        }
-                        else if(fd.getJavaType() == JavaType.MESSAGE) {
-
+                            if(fd.getType().getJavaType() == JavaType.MESSAGE){
+                                if(bd.isOfProtolyzerMessageType()){
+                                    for (int ny = 0; ny < numFields; ny++){
+                                        objs.add(mapToBeanFn((bd.getMatchingMessageType()).cast(proto.getRepeatedField(fd, ny)), bd.getCollectionInnerType()));
+                                    }
+                                    // TODO more collections types
+                                    args.add(objs);
+                                }
+                                else if(bd.isOfGoogleMessageType()){
+                                    for (int ny = 0; ny < numFields; ny++){
+                                        Optional<Object> res = convert(proto.getRepeatedField(fd, ny), fd, bd);
+                                        res.ifPresent(objs::add);
+                                    }
+                                }
+                            }
+                            else {
+                                for (int ny = 0; ny < numFields; ny++){
+                                    convert(proto.getRepeatedField(fd, ny), fd, bd).ifPresent(objs::add);
+                                }
+                                // TODO more collections types
+                                args.add(objs);
+                            }
                         }
-                        convert(proto.getField(fd), fd, provider.getRequiredMappings().get(fd));
-                        args.add(proto.getField(fd));
-                        classes[i] = provider.getRequiredMappings().get(fd).getDescriptor().getPropertyType();
+                        else if(fd.getJavaType() == JavaType.MESSAGE){
+                            if(bd.isOfProtolyzerMessageType()){
+                                args.add(mapToBeanFn((bd.getMatchingMessageType()).cast(proto.getField(fd)), bd.getDescriptor().getPropertyType()));
+                            }
+                            else if(bd.isOfGoogleMessageType()){
+
+                            }
+                        }
+                        else {
+                            convert(proto.getField(fd), fd, bd).ifPresent(args::add);
+                        }
+                        classes[i] = bd.getDescriptor().getPropertyType();
                         i++;
                     }
                     else { throw new ProtolyzerMappingException("Required (@NonNull/@NotNull) field value missing from proto object, unable to convert to POJO."); }
